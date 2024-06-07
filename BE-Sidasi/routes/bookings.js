@@ -1,6 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const db = require("../config/config");
+const multer = require('multer');
+const upload = multer({ dest: 'uploads/' });
 
 // Middleware untuk menangani kesalahan umum
 router.use((err, req, res, next) => {
@@ -60,12 +62,13 @@ router.get("/bookings/:id", (req, res) => {
 });
 
 // Create new table booking
-router.post("/bookings", (req, res) => {
-  const { id_user, nama_user, tanggal_booking, status_pembayaran } = req.body;
+router.post("/bookings", upload.single('screenshot'), (req, res) => {
+  const { id_user, nama_user, tanggal_booking, status_pembayaran, id_bookings } = req.body;
+  const screenshot = req.file ? req.file.path : null;
 
-  const sql = `INSERT INTO bookings (id_user, nama_user, tanggal_booking, status_pembayaran) VALUES ('${id_user}', '${nama_user}', '${tanggal_booking}', '${status_pembayaran}')`;
+  const sql = `INSERT INTO bookings (id_user, nama_user, tanggal_booking, status_pembayaran, id_bookings, screenshot) VALUES (?, ?, ?, ?, ?, ?)`;
 
-  db.query(sql, (err, data) => {
+  db.query(sql, [id_user, nama_user, tanggal_booking, status_pembayaran, id_bookings, screenshot], (err, data) => {
     if (err) {
       console.error(err);
       res.status(500).send({
@@ -74,7 +77,7 @@ router.post("/bookings", (req, res) => {
         data: [],
       });
     } else {
-      res.send({
+      res.status(201).send({
         status: true,
         message: "Data Created",
         data: data,
@@ -87,9 +90,9 @@ router.post("/bookings", (req, res) => {
 router.put("/bookings/:id", (req, res) => {
   const { id_user, nama_user, tanggal_booking, status_pembayaran } = req.body;
   const id = req.params.id;
-  const sql = `UPDATE bookings SET id_user = '${id_user}', nama_user = '${nama_user}', tanggal_booking = '${tanggal_booking}', status_pembayaran = '${status_pembayaran}' WHERE id_booking = ${id}`;
+  const sql = `UPDATE bookings SET id_user = ?, nama_user = ?, tanggal_booking = ?, status_pembayaran = ? WHERE id_booking = ?`;
   
-  db.query(sql, (err, data) => {
+  db.query(sql, [id_user, nama_user, tanggal_booking, status_pembayaran, id], (err, data) => {
     if (err) {
       res.status(500).send({
         status: false,
@@ -117,9 +120,9 @@ router.put("/bookings/:id", (req, res) => {
 // Delete table booking
 router.delete("/bookings/:id", (req, res) => {
   const id = req.params.id;
-  const sql = `DELETE FROM bookings WHERE id_booking = ${id}`;
+  const sql = `DELETE FROM bookings WHERE id_booking = ?`;
 
-  db.query(sql, (err, data) => {
+  db.query(sql, [id], (err, data) => {
     if (err) {
       res.status(500).send({
         status: false,
