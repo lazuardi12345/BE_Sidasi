@@ -1,150 +1,154 @@
 const express = require("express");
 const router = express.Router();
-const db = require("../config/config");
-const multer = require('multer');
-const upload = multer({ dest: 'uploads/' });
+const pool = require("../config/config");
+const multer = require("multer");
+const path = require("path");
+const cors = require("cors");
+const { body, param, validationResult } = require("express-validator");
 
-// Middleware untuk menangani kesalahan umum
+router.use(cors());
+router.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'public/uploads/');
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage: storage });
+
 router.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).send("Something went wrong!");
 });
 
-// Read all table bookings
-router.get("/bookings", (req, res) => {
-  const sql = `SELECT * FROM bookings`;
+const handleErrors = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
 
-  db.query(sql, (err, data) => {
-    if (err) {
-      res.status(500).send({
-        status: false,
-        message: "Error fetching data",
-        data: [],
-      });
-    } else {
-      res.send({
-        status: true,
-        message: "GET SUCCESS",
-        data: data,
-      });
+const validateBooking = [
+  body('id_user').isInt(),
+  body('tanggal_booking').isISO8601().toDate(),
+  body('status_pembayaran').isString(),
+  body('products').isArray().custom((products) => {
+    return products.every(product => 'id_produk' in product && 'quantity' in product && Number.isInteger(product.id_produk) && Number.isInteger(product.quantity));
+  }),
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
     }
-  });
-});
+    next();
+  }
+];
 
-// Read table booking by Id
-router.get("/bookings/:id", (req, res) => {
+const insertHistory = async (id_booking, id_user, id_transaksi) => {
+  const sql = `INSERT INTO riwayat (id_booking, id_user, id_transaksi) VALUES (?, ?, ?)`;
+  await pool.query(sql, [id_booking, id_user, id_transaksi]);
+};
+
+// Read all bookings
+router.get("/bookings", handleErrors(async (req, res) => {
+  const sql = `
+    SELECT b.*, u.nama 
+    FROM bookings b
+    JOIN users u ON b.id_user = u.id_user`;
+  const [data] = await pool.query(sql);
+  res.send({ status: true, message: "GET SUCCESS", data });
+}));
+
+// Read booking by ID
+router.get("/bookings/:id", [
+  param('id').isInt()
+], handleErrors(async (req, res) => {
   const id = req.params.id;
-  const sql = `SELECT * FROM bookings WHERE id_booking = ${id}`;
+  const sql = `
+    SELECT b.*, u.nama
+    FROM bookings b
+    JOIN users u ON b.id_user = u.id_user
+    WHERE b.id_booking = ?`;
+  const [data] = await pool.query(sql, [id]);
+  if (data.length === 0) {
+    return res.status(404).send({ status: false, message: "Booking not found", data: [] });
+  }
+  res.send({ status: true, message: "GET SUCCESS", data });
+}));
 
-  db.query(sql, (err, data) => {
-    if (err) {
-      res.status(500).send({
-        status: false,
-        message: "Error fetching data",
-        data: [],
-      });
-    } else {
-      if (data.length === 0) {
-        res.status(404).send({
-          status: false,
-          message: "Booking not found",
-          data: [],
-        });
-      } else {
-        res.send({
-          status: true,
-          message: "GET SUCCESS",
-          data: data,
-        });
-      }
-    }
-  });
-});
+// Create new booking (with payment proof)
+router.post("/bookings", upload.single('bukti_pembayaran'), validateBooking, handleErrors(async (req, res) => {
+  const { id_user, tanggal_booking, status_pembayaran, products } = req.body;
+  const bukti_pembayaran = req.file ? `/uploads/${req.file.filename}` : null;
 
-// Create new table booking
-router.post("/bookings", upload.single('screenshot'), (req, res) => {
-  const { id_user, nama_user, tanggal_booking, status_pembayaran, id_bookings } = req.body;
-  const screenshot = req.file ? req.file.path : null;
+  const sqlBooking = `INSERT INTO bookings (id_user, tanggal_booking, status_pembayaran, bukti_pembayaran) VALUES (?, ?, ?, ?)`;
+  const [bookingResult] = await pool.query(sqlBooking, [id_user, tanggal_booking, status_pembayaran, bukti_pembayaran]);
 
-  const sql = `INSERT INTO bookings (id_user, nama_user, tanggal_booking, status_pembayaran, id_bookings, screenshot) VALUES (?, ?, ?, ?, ?, ?)`;
+  const bookingId = bookingResult.insertId;
+  const sqlBookingProducts = `INSERT INTO booking_products (id_booking, id_produk, quantity) VALUES ?`;
+  const bookingProductsValues = products.map(product => [bookingId, product.id_produk, product.quantity]);
 
-  db.query(sql, [id_user, nama_user, tanggal_booking, status_pembayaran, id_bookings, screenshot], (err, data) => {
-    if (err) {
-      console.error(err);
-      res.status(500).send({
-        status: false,
-        message: "Error creating data",
-        data: [],
-      });
-    } else {
-      res.status(201).send({
-        status: true,
-        message: "Data Created",
-        data: data,
-      });
-    }
-  });
-});
+  await pool.query(sqlBookingProducts, [bookingProductsValues]);
 
-// Update table booking
-router.put("/bookings/:id", (req, res) => {
-  const { id_user, nama_user, tanggal_booking, status_pembayaran } = req.body;
+  // Add entry to transaksi table
+  const sqlTransaksi = `INSERT INTO transaksi (id_booking, id_user, tanggal_booking, validasi) VALUES (?, ?, ?, ?)`;
+  const [transaksiResult] = await pool.query(sqlTransaksi, [bookingId, id_user, tanggal_booking, 'Belum']);
+
+  const transaksiId = transaksiResult.insertId;
+
+  // Insert into riwayat table
+  await insertHistory(bookingId, id_user, transaksiId);
+
+  res.status(201).send({ status: true, message: "Data Created", data: { bookingId, transaksiId } });
+}));
+
+// Update booking (with payment proof)
+router.put("/bookings/:id", upload.single('bukti_pembayaran'), [
+  param('id').isInt()
+], handleErrors(async (req, res) => {
   const id = req.params.id;
-  const sql = `UPDATE bookings SET id_user = ?, nama_user = ?, tanggal_booking = ?, status_pembayaran = ? WHERE id_booking = ?`;
-  
-  db.query(sql, [id_user, nama_user, tanggal_booking, status_pembayaran, id], (err, data) => {
-    if (err) {
-      res.status(500).send({
-        status: false,
-        message: `Error updating data, ${err}`,
-        data: [],
-      });
-    } else {
-      if (data.affectedRows === 0) {
-        res.status(404).send({
-          status: false,
-          message: "Booking not found",
-          data: [],
-        });
-      } else {
-        res.send({
-          status: true,
-          message: "Update Success",
-          data: data,
-        });
-      }
-    }
-  });
-});
+  const bukti_pembayaran = req.file ? `/uploads/${req.file.filename}` : null;
 
-// Delete table booking
-router.delete("/bookings/:id", (req, res) => {
+  const sql = `UPDATE bookings SET bukti_pembayaran = ? WHERE id_booking = ?`;
+  const [data] = await pool.query(sql, [bukti_pembayaran, id]);
+  if (data.affectedRows === 0) {
+    return res.status(404).send({ status: false, message: "Booking not found", data: [] });
+  }
+  res.send({ status: true, message: "Update Success", data });
+}));
+
+// Delete booking
+router.delete("/bookings/:id", [
+  param('id').isInt()
+], handleErrors(async (req, res) => {
   const id = req.params.id;
   const sql = `DELETE FROM bookings WHERE id_booking = ?`;
+  const [data] = await pool.query(sql, [id]);
+  if (data.affectedRows === 0) {
+    return res.status(404).send({ status: false, message: "Booking not found", data: [] });
+  }
+  res.send({ status: true, message: "Delete Success", data });
+}));
 
-  db.query(sql, [id], (err, data) => {
-    if (err) {
-      res.status(500).send({
-        status: false,
-        message: "Error deleting data",
-        data: [],
-      });
-    } else {
-      if (data.affectedRows === 0) {
-        res.status(404).send({
-          status: false,
-          message: "Booking not found",
-          data: [],
-        });
-      } else {
-        res.send({
-          status: true,
-          message: "Delete Success",
-          data: data,
-        });
-      }
-    }
-  });
-});
+// Get booking details including products
+router.get("/booking-details/:id", [
+  param('id').isInt()
+], handleErrors(async (req, res) => {
+  const id = req.params.id;
+  const sql = `
+    SELECT b.id_booking, u.nama, bp.id_produk, p.nama_produk, bp.quantity
+    FROM bookings b
+    JOIN users u ON b.id_user = u.id_user
+    JOIN booking_products bp ON b.id_booking = bp.id_booking
+    JOIN produks p ON bp.id_produk = p.id_produk
+    WHERE b.id_booking = ?`;
+
+  const [data] = await pool.query(sql, [id]);
+  if (data.length === 0) {
+    return res.status(404).send({ status: false, message: "Booking details not found", data: [] });
+  }
+  res.send({ status: true, message: "GET SUCCESS", data });
+}));
 
 module.exports = router;
