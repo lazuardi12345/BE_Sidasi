@@ -1,19 +1,22 @@
 const express = require("express");
 const router = express.Router();
-const pool = require("../config/config");
+const { pool } = require("../config/config");
 const multer = require("multer");
 const path = require("path");
+const fs = require('fs');
+const jwt = require('jsonwebtoken'); // Import JWT library
 const cors = require("cors");
 
-// Apply CORS middleware
-router.use(cors());
+const corsOptions = {
+  origin: 'http://localhost:3001', // Izinkan request dari origin ini
+  credentials: true, // Izinkan pengiriman cookies dari frontend ke backend
+};
 
-// Serve static files from the public/uploads directory
-router.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+// Gunakan middleware CORS di router ini
+router.use(cors(corsOptions));
 
 // Ensure the uploads directory exists
 const uploadDir = path.join(__dirname, '..', 'public', 'uploads');
-const fs = require('fs');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -28,7 +31,35 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // Limit file size to 10MB
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedFileTypes = /jpeg|jpg|png|gif/;
+    const extname = allowedFileTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedFileTypes.test(file.mimetype);
+    if (extname && mimetype) {
+      return cb(null, true);
+    } else {
+      cb('Error: Images Only!');
+    }
+  }
+});
+
+// Middleware to verify JWT token
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.sendStatus(401); // Unauthorized if no token
+
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, user) => {
+    if (err) return res.sendStatus(403); // Forbidden if token is invalid
+    req.user = user; // Set user object from decoded token
+    next(); // Proceed to next middleware
+  });
+};
 
 // Middleware for handling common errors
 router.use((err, req, res, next) => {
@@ -37,7 +68,7 @@ router.use((err, req, res, next) => {
 });
 
 // Add profile
-router.post("/profils", upload.single('foto'), async (req, res) => {
+router.post("/profils", verifyToken, upload.single('foto'), async (req, res) => {
   try {
     const { id_user } = req.body;
     const foto = req.file ? `/uploads/${req.file.filename}` : null;
@@ -61,7 +92,7 @@ router.post("/profils", upload.single('foto'), async (req, res) => {
 });
 
 // Get profile with user information
-router.get("/profils/:id", (req, res) => {
+router.get("/profils/:id", verifyToken, (req, res) => {
   const id_profile = req.params.id;
   const sql = `
     SELECT p.id_profil, p.foto, u.nama, u.alamat, u.no_hp, u.email
@@ -95,13 +126,11 @@ router.get("/profils/:id", (req, res) => {
   });
 });
 
-
-
 // Update profile
-router.put("/profils/:id", upload.single('foto'), async (req, res) => {
+router.put("/profils/:id", verifyToken, upload.single('foto'), async (req, res) => {
   try {
     const id_profile = req.params.id;
-    const { foto } = req.file ? `/uploads/${req.file.filename}` : null;
+    const foto = req.file ? `/uploads/${req.file.filename}` : null;
 
     const sql = `UPDATE profils SET foto = ? WHERE id_profil = ?`;
 
@@ -129,7 +158,7 @@ router.put("/profils/:id", upload.single('foto'), async (req, res) => {
 });
 
 // Delete profile
-router.delete("/profils/:id", async (req, res) => {
+router.delete("/profils/:id", verifyToken, async (req, res) => {
   try {
     const id_profile = req.params.id;
 
@@ -159,8 +188,7 @@ router.delete("/profils/:id", async (req, res) => {
 });
 
 // Get all profiles
-// Get all profiles
-router.get("/profils", async (req, res) => {
+router.get("/profils", verifyToken, async (req, res) => {
   try {
     const sql = `
       SELECT p.id_profil, p.foto, u.id_user, u.nama, u.alamat, u.no_hp, u.email
@@ -192,8 +220,5 @@ router.get("/profils", async (req, res) => {
     });
   }
 });
-
-
-
 
 module.exports = router;

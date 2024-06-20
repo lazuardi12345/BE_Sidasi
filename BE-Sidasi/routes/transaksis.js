@@ -1,10 +1,19 @@
 const express = require("express");
 const router = express.Router();
-const pool = require("../config/config");
+const { pool, secretKey } = require("../config/config");
 const { param, body, validationResult } = require('express-validator');
 const path = require('path');
 const cors = require('cors');
 
+
+
+const corsOptions = {
+  origin: 'http://localhost:3001', // Izinkan request dari origin ini
+  credentials: true, // Izinkan pengiriman cookies dari frontend ke backend
+};
+
+// Gunakan middleware CORS di router ini
+router.use(cors(corsOptions));
 router.use(cors());
 router.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 

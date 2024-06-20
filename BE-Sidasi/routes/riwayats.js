@@ -1,7 +1,16 @@
 const express = require("express");
 const router = express.Router();
-const pool = require("../config/config");
+const { pool, secretKey } = require("../config/config");
 const { param, validationResult } = require('express-validator');
+const cors = require("cors");
+
+const corsOptions = {
+  origin: 'http://localhost:3001', // Izinkan request dari origin ini
+  credentials: true, // Izinkan pengiriman cookies dari frontend ke backend
+};
+
+// Gunakan middleware CORS di router ini
+router.use(cors(corsOptions));
 
 // Middleware for error handling
 const handleErrors = (handler) => async (req, res, next) => {

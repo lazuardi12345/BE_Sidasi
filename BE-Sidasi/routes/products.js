@@ -1,12 +1,8 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const multer = require("multer");
-const pool = require("../config/config");  // Ensure this exports the promise-based pool
-const path = require("path");
-const cors = require("cors");
-
-router.use(cors());
-router.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
+const multer = require('multer');
+const { pool } = require('../config/config');
+const path = require('path');
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -19,93 +15,75 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-router.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).send("Something went wrong!");
+// Endpoint to get all products
+router.get('/produks', async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query('SELECT * FROM produks'); // Pastikan tabel yang dipanggil adalah 'produk'
+    conn.release();
+    res.json({ data: rows });
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
 });
 
-const handleErrors = (fn) => (req, res, next) => {
-  Promise.resolve(fn(req, res, next)).catch(next);
-};
 
-router.get("/produks", handleErrors(async (req, res) => {
-  const sql = `SELECT * FROM produks`;
-  const [data] = await pool.query(sql);
-  res.send({
-    status: true,
-    message: "GET SUCCESS",
-    data: data,
-  });
-}));
-
-router.get("/produks/:id", handleErrors(async (req, res) => {
-  const id = req.params.id;
-  const sql = `SELECT * FROM produks WHERE id_produk = ?`;  // Correct column name
-  const [data] = await pool.query(sql, [id]);
-  if (data.length === 0) {
-    return res.status(404).send({
-      status: false,
-      message: "Product not found",
-      data: [],
-    });
-  }
-  res.send({
-    status: true,
-    message: "GET SUCCESS",
-    data: data,
-  });
-}));
-
-router.post("/produks", upload.single('foto_produk'), handleErrors(async (req, res) => {
+// Endpoint to add a new product
+router.post('/produks', upload.single('foto_produk'), async (req, res) => {
   const { nama_produk, kategori, harga, stok, satuan, status } = req.body;
   const foto_produk = `/uploads/${req.file.filename}`;
-  const sql = `INSERT INTO produks (nama_produk, kategori, harga, stok, satuan, status, foto_produk) VALUES (?, ?, ?, ?, ?, ?, ?)`;
-  const values = [nama_produk, kategori, harga, stok, satuan, status, foto_produk];
-  const [data] = await pool.query(sql, values);
-  res.send({
-    status: true,
-    message: "Data Created",
-    data: data,
-  });
-}));
 
-router.put("/produks/:id", upload.single('foto_produk'), handleErrors(async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [result] = await conn.query(
+      'INSERT INTO produk (nama_produk, kategori, harga, stok, satuan, status, foto_produk) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [nama_produk, kategori, harga, stok, satuan, status, foto_produk]
+    );
+    conn.release();
+
+    res.status(201).json({ message: 'Product added successfully', data: { id: result.insertId, nama_produk, kategori, harga, stok, satuan, status, foto_produk } });
+  } catch (error) {
+    console.error('Error adding product:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Endpoint to update a product
+router.put('/produks/:id', upload.single('foto_produk'), async (req, res) => {
   const { nama_produk, kategori, harga, stok, satuan, status } = req.body;
-  const id = req.params.id;
+  const { id } = req.params;
   const foto_produk = req.file ? `/uploads/${req.file.filename}` : req.body.foto_produk;
-  const sql = `UPDATE produks SET nama_produk = ?, kategori = ?, harga = ?, stok = ?, satuan = ?, status = ?, foto_produk = ? WHERE id_produk = ?`;  // Correct column name
-  const values = [nama_produk, kategori, harga, stok, satuan, status, foto_produk, id];
-  const [data] = await pool.query(sql, values);
-  if (data.affectedRows === 0) {
-    return res.status(404).send({
-      status: false,
-      message: "Product not found",
-      data: [],
-    });
-  }
-  res.send({
-    status: true,
-    message: "Update Success",
-    data: data,
-  });
-}));
 
-router.delete("/produks/:id", handleErrors(async (req, res) => {
-  const id = req.params.id;
-  const sql = `DELETE FROM produks WHERE id_produk = ?`;  // Correct column name
-  const [data] = await pool.query(sql, [id]);
-  if (data.affectedRows === 0) {
-    return res.status(404).send({
-      status: false,
-      message: "Product not found",
-      data: [],
-    });
+  try {
+    const conn = await pool.getConnection();
+    await conn.query(
+      'UPDATE produks SET nama_produk = ?, kategori = ?, harga = ?, stok = ?, satuan = ?, status = ?, foto_produk = ? WHERE id_produk = ?',
+      [nama_produk, kategori, harga, stok, satuan, status, foto_produk, id]
+    );
+    conn.release();
+
+    res.json({ message: 'Product updated successfully', data: { id, nama_produk, kategori, harga, stok, satuan, status, foto_produk } });
+  } catch (error) {
+    console.error('Error updating product:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
-  res.send({
-    status: true,
-    message: "Delete Success",
-    data: data,
-  });
-}));
+});
+
+// Endpoint to delete a product
+router.delete('/produks/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const conn = await pool.getConnection();
+    await conn.query('DELETE FROM produk WHERE id_produk = ?', [id]);
+    conn.release();
+
+    res.sendStatus(204);
+  } catch (error) {
+    console.error('Error deleting product:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
 
 module.exports = router;
