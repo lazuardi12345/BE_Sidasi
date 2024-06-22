@@ -28,6 +28,24 @@ router.get('/produks', async (req, res) => {
   }
 });
 
+// Endpoint to get a product by ID
+router.get('/produks/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query('SELECT * FROM produks WHERE id_produk = ?', [id]);
+    conn.release();
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    res.json({ data: rows[0] });
+  } catch (error) {
+    console.error('Error fetching product:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
 
 // Endpoint to add a new product
 router.post('/produks', upload.single('foto_produk'), async (req, res) => {
@@ -37,7 +55,7 @@ router.post('/produks', upload.single('foto_produk'), async (req, res) => {
   try {
     const conn = await pool.getConnection();
     const [result] = await conn.query(
-      'INSERT INTO produk (nama_produk, kategori, harga, stok, satuan, status, foto_produk) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO produks (nama_produk, kategori, harga, stok, satuan, status, foto_produk) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [nama_produk, kategori, harga, stok, satuan, status, foto_produk]
     );
     conn.release();
@@ -57,11 +75,15 @@ router.put('/produks/:id', upload.single('foto_produk'), async (req, res) => {
 
   try {
     const conn = await pool.getConnection();
-    await conn.query(
+    const [result] = await conn.query(
       'UPDATE produks SET nama_produk = ?, kategori = ?, harga = ?, stok = ?, satuan = ?, status = ?, foto_produk = ? WHERE id_produk = ?',
       [nama_produk, kategori, harga, stok, satuan, status, foto_produk, id]
     );
     conn.release();
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
 
     res.json({ message: 'Product updated successfully', data: { id, nama_produk, kategori, harga, stok, satuan, status, foto_produk } });
   } catch (error) {
@@ -76,8 +98,12 @@ router.delete('/produks/:id', async (req, res) => {
 
   try {
     const conn = await pool.getConnection();
-    await conn.query('DELETE FROM produk WHERE id_produk = ?', [id]);
+    const [result] = await conn.query('DELETE FROM produks WHERE id_produk = ?', [id]);
     conn.release();
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
 
     res.sendStatus(204);
   } catch (error) {

@@ -5,10 +5,10 @@ const cookieParser = require('cookie-parser');
 const logger = require('morgan');
 const cors = require('cors');
 
-const indexRouter = require('./routes/index');
+// const indexRouter = require('./routes/index');
 const productsRouter = require('./routes/products');
 const bookingsRouter = require('./routes/bookings');
-const transaksisRouter = require('./routes/transaksis');
+// const transaksisRouter = require('./routes/transaksis');
 const riwayatsRouter = require('./routes/riwayats');
 const profilsRouter = require('./routes/profils');
 const pelanggansRouter = require('./routes/pelanggans');
@@ -29,10 +29,10 @@ app.use(express.static(path.join(__dirname, 'public'))); // Middleware untuk ser
 app.use(cors()); // Middleware untuk mengaktifkan CORS
 
 // Route setup
-app.use('/', indexRouter);
+// app.use('/', indexRouter);
 app.use('/products', productsRouter);
 app.use('/bookings', bookingsRouter);
-app.use('/transaksis', transaksisRouter);
+// app.use('/transaksis', transaksisRouter);
 app.use('/riwayats', riwayatsRouter);
 app.use('/profils', profilsRouter);
 app.use('/pelanggans', pelanggansRouter);
