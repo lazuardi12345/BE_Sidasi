@@ -1,167 +1,68 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const { pool, secretKey } = require("../config/config");
-const multer = require("multer");
-const path = require("path");
-const cors = require("cors");
+const { pool } = require('../config/config');
+const authenticateToken = require('../middleware/authenticateToken');
 
-const corsOptions = {
-  origin: 'http://localhost:3001', // Izinkan request dari origin ini
-  credentials: true, // Izinkan pengiriman cookies dari frontend ke backend
-};
-
-// Gunakan middleware CORS di router ini
-router.use(cors(corsOptions));
-
-// Apply CORS middleware
-router.use(cors());
-
-// Serve static files from the public/uploads directory
-router.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
-
-// Ensure the uploads directory exists
-const uploadDir = path.join(__dirname, '..', 'public', 'uploads');
-const fs = require('fs');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir); // Store files in 'public/uploads'
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname)); // Unique filenames
-  }
+// GET all pelanggans dengan data dari users
+router.get('/pelanggans', authenticateToken, async (req, res) => {
+    try {
+        const conn = await pool.getConnection();
+        const [rows] = await conn.query(`
+            SELECT p.id, u.nama, u.alamat, u.no_hp, u.email, u.foto 
+            FROM pelanggans p
+            INNER JOIN users u ON p.id_user = u.id_user
+        `);
+        conn.release();
+        res.json(rows);
+    } catch (error) {
+        console.error('Error getting pelanggans:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
 });
 
-const upload = multer({ storage: storage });
+// GET pelanggan by id_pelanggan dengan data dari users
+router.get('/pelanggans/:id', authenticateToken, async (req, res) => {
+    const idPelanggan = req.params.id;
 
-// Middleware for handling common errors
-router.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).send("Something went wrong!");
+    try {
+        const conn = await pool.getConnection();
+        const [rows] = await conn.query(`
+            SELECT p.id, u.nama, u.alamat, u.no_hp, u.email, u.foto 
+            FROM pelanggans p
+            INNER JOIN users u ON p.id_user = u.id_user
+            WHERE p.id = ?
+        `, [idPelanggan]);
+        conn.release();
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: 'Pelanggan not found' });
+        }
+
+        res.json(rows[0]);
+    } catch (error) {
+        console.error('Error getting pelanggan by id:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
 });
 
-// Add profile
-router.post("/profils", upload.single('foto'), async (req, res) => {
-  try {
+// POST create a new pelanggan
+router.post('/pelanggans', authenticateToken, async (req, res) => {
     const { id_user } = req.body;
-    const foto = req.file ? `/uploads/${req.file.filename}` : null;
 
-    const sql = `INSERT INTO profils (id_user, foto) VALUES (?, ?)`;
+    try {
+        if (!id_user) {
+            return res.status(400).json({ message: 'ID User is required' });
+        }
 
-    const [data] = await pool.query(sql, [id_user, foto]);
-    res.status(201).send({
-      status: true,
-      message: "Profile Created",
-      data: data,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({
-      status: false,
-      message: "Error creating profile",
-      data: [],
-    });
-  }
-});
+        const conn = await pool.getConnection();
+        const [result] = await conn.query('INSERT INTO pelanggans (id_user) VALUES (?)', [id_user]);
+        conn.release();
 
-// Get profile with user information
-router.get("/profils/:id_user", (req, res) => {
-  const id_user = req.params.id_user;
-  const sql = `
-    SELECT p.id_profil, p.foto, u.nama, u.alamat, u.no_hp, u.email
-    FROM profils p
-    JOIN users u ON p.id_user = u.id_user
-    WHERE p.id_user = ?`;
-
-  pool.query(sql, [id_user], (err, data) => {
-    if (err) {
-      console.error(err);
-      res.status(500).send({
-        status: false,
-        message: "Error fetching profile",
-        data: [],
-      });
-    } else {
-      if (data.length === 0) {
-        res.status(404).send({
-          status: false,
-          message: "Profile not found",
-          data: [],
-        });
-      } else {
-        res.send({
-          status: true,
-          message: "GET SUCCESS",
-          data: data,
-        });
-      }
+        res.status(201).json({ message: 'Pelanggan successfully created', id_pelanggan: result.insertId });
+    } catch (error) {
+        console.error('Error creating pelanggan:', error);
+        res.status(500).json({ message: 'Internal server error' });
     }
-  });
 });
-// Update profile
-router.put("/profils/:id_user", upload.single('foto'), async (req, res) => {
-  try {
-    const id_user = req.params.id_user;
-    const { foto } = req.file ? `/uploads/${req.file.filename}` : null;
-
-    const sql = `UPDATE profils SET foto = ? WHERE id_user = ?`;
-
-    const [data] = await pool.query(sql, [foto, id_user]);
-    if (data.affectedRows === 0) {
-      return res.status(404).send({
-        status: false,
-        message: "Profile not found",
-        data: [],
-      });
-    }
-    res.send({
-      status: true,
-      message: "Profile Updated",
-      data: data,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({
-      status: false,
-      message: "Error updating profile",
-      data: [],
-    });
-  }
-});
-
-// Delete profile
-router.delete("/profils/:id_user", async (req, res) => {
-  try {
-    const id_user = req.params.id_user;
-
-    const sql = `DELETE FROM profils WHERE id_user = ?`;
-
-    const [data] = await pool.query(sql, [id_user]);
-    if (data.affectedRows === 0) {
-      return res.status(404).send({
-        status: false,
-        message: "Profile not found",
-        data: [],
-      });
-    }
-    res.send({
-      status: true,
-      message: "Profile Deleted",
-      data: data,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({
-      status: false,
-      message: "Error deleting profile",
-      data: [],
-    });
-  }
-});
-
 
 module.exports = router;

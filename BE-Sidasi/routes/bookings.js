@@ -207,21 +207,37 @@ router.put('/bookings/:id', upload.single('bukti_pembayaran'), validateUpdateBoo
 
 // Endpoint to fetch booking details by id
 router.get("/booking-details/:id", [
-  param('id').isInt()
+  param('id').isInt().withMessage('ID must be an integer')
 ], async (req, res, next) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
     const id = req.params.id;
-    const sql = `SELECT bp.id_booking, bp.id_produk, bp.quantity, b.tanggal_booking, b.status_pembayaran, b.validasi 
-                 FROM booking_products bp 
-                 JOIN bookings b ON bp.id_booking = b.id_booking 
-                 WHERE b.id_booking = ?`;
+    console.log(`Fetching booking details for ID: ${id}`);
+    
+    const sql = `
+      SELECT bp.id_booking, u.nama AS nama_pengguna, p.nama_produk, bp.id_produk, bp.quantity, p.harga, p.satuan, b.tanggal_booking, b.status_pembayaran, b.validasi
+      FROM booking_products bp 
+      JOIN bookings b ON bp.id_booking = b.id_booking 
+      JOIN users u ON b.id_user = u.id_user
+      JOIN produks p ON bp.id_produk = p.id_produk
+      WHERE b.id_booking = ?`;
+    
     const [results] = await pool.query(sql, [id]);
+    
     res.status(200).json({ status: true, message: "Data Fetched", data: results });
   } catch (error) {
     console.error('Error fetching booking details:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+
+
+
 
 // Endpoint to fetch all bookings
 router.get('/bookings', async (req, res, next) => {
