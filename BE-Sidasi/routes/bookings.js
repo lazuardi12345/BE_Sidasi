@@ -112,16 +112,20 @@ const runTransactionWithRetry = async (transactionCallback, retries = 3, delay =
 };
 
 // Endpoint to create a new booking
+// Endpoint to create a new booking
 router.post("/bookings", upload.single('bukti_pembayaran'), validateBooking, async (req, res, next) => {
   try {
     const { id_user, tanggal_booking, status_pembayaran, products } = req.body;
     const bukti_pembayaran = req.file ? `/uploads/${req.file.filename}` : null;
 
+    // Set default value for status_pembayaran if not provided
+    const paymentStatus = status_pembayaran || 'Proses';
+
     await runTransactionWithRetry(async (connection) => {
       await connection.beginTransaction();
 
       const sqlBooking = `INSERT INTO bookings (id_user, tanggal_booking, status_pembayaran, bukti_pembayaran, validasi) VALUES (?, ?, ?, ?, 'Belum')`;
-      const [bookingResult] = await connection.query(sqlBooking, [id_user, tanggal_booking, status_pembayaran, bukti_pembayaran]);
+      const [bookingResult] = await connection.query(sqlBooking, [id_user, tanggal_booking, paymentStatus, bukti_pembayaran]);
       const bookingId = bookingResult.insertId;
 
       const parsedProducts = JSON.parse(products);
@@ -140,6 +144,7 @@ router.post("/bookings", upload.single('bukti_pembayaran'), validateBooking, asy
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
 
 // Endpoint to update an existing booking
 router.put('/bookings/:id', upload.single('bukti_pembayaran'), validateUpdateBooking, async (req, res, next) => {
@@ -240,15 +245,23 @@ router.get("/booking-details/:id", [
 
 
 // Endpoint to fetch all bookings
-router.get('/bookings', async (req, res, next) => {
+router.get('/bookings', async (req, res) => {
   try {
-    const sql = `SELECT b.id_booking, b.id_user, u.nama, b.tanggal_booking, b.status_pembayaran, b.bukti_pembayaran, b.validasi,
-                 GROUP_CONCAT(bp.id_produk) as produk_ids, GROUP_CONCAT(bp.quantity) as quantities
-                 FROM bookings b 
-                 LEFT JOIN booking_products bp ON b.id_booking = bp.id_booking
-                 LEFT JOIN users u ON b.id_user = u.id_user
-                 GROUP BY b.id_booking`;
-    const [results] = await pool.query(sql);
+    const id_user = req.headers['id_user']; // Mengambil id_user dari header
+
+    let sql = `SELECT b.id_booking, b.id_user, u.nama, b.tanggal_booking, b.status_pembayaran, b.bukti_pembayaran, b.validasi,
+               GROUP_CONCAT(bp.id_produk) as produk_ids, GROUP_CONCAT(bp.quantity) as quantities
+               FROM bookings b 
+               LEFT JOIN booking_products bp ON b.id_booking = bp.id_booking
+               LEFT JOIN users u ON b.id_user = u.id_user`;
+    
+    if (id_user) {
+      sql += ` WHERE b.id_user = ?`; // Filter berdasarkan id_user jika disediakan
+    }
+    
+    sql += ` GROUP BY b.id_booking`;
+
+    const [results] = await pool.query(sql, [id_user].filter(Boolean)); // Hanya memasukkan id_user jika ada
     res.status(200).json({ status: true, message: 'Data Fetched', data: results });
   } catch (error) {
     console.error('Error fetching bookings:', error);

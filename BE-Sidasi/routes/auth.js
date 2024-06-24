@@ -20,6 +20,16 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
+// Middleware to check if the user has a specific role
+const authorizeRole = (role) => {
+    return (req, res, next) => {
+        if (req.user.role !== role) {
+            return res.status(403).json({ message: 'Forbidden: Insufficient rights' });
+        }
+        next();
+    };
+};
+
 // Setup multer storage configuration
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -65,7 +75,6 @@ router.post('/register', async (req, res) => {
         res.status(500).json({ message: 'Kesalahan internal server' });
     }
 });
-
 
 // Endpoint for user login
 router.post('/login', async (req, res) => {
@@ -182,7 +191,7 @@ router.put('/user', authenticateToken, upload.single('foto'), async (req, res) =
 });
 
 // Endpoint to update user data by id
-router.put('/user/:id', authenticateToken, upload.single('foto'), async (req, res) => {
+router.put('/user/:id', authenticateToken, authorizeRole('admin'), upload.single('foto'), async (req, res) => {
     const userId = req.params.id;
     const { nama, alamat, email, password, no_hp } = req.body;
     const foto = req.file ? `/uploads/${req.file.filename}` : req.body.foto;
@@ -221,19 +230,20 @@ router.put('/user/:id', authenticateToken, upload.single('foto'), async (req, re
         res.status(500).json({ message: 'Internal server error' });
     }
 });
-// Endpoint to get all users
-router.get('/users', authenticateToken, async (req, res) => {
-  try {
-      const conn = await pool.getConnection();
-      const [rows] = await conn.query('SELECT id_user, nama, alamat, email, foto, no_hp, role FROM users');
-      conn.release();
 
-      res.json(rows);
-  } catch (error) {
-      console.error('Error getting all users:', error);
-      res.status(500).json({ message: 'Internal server error' });
-  }
+// Endpoint to get all users, accessible only to admins
+router.get('/users', authenticateToken, authorizeRole('admin'), async (req, res) => {
+    try {
+        const conn = await pool.getConnection();
+        const [rows] = await conn.query('SELECT id_user, nama, alamat, email, foto, no_hp, role FROM users');
+        conn.release();
+
+        res.json(rows);
+    } catch (error) {
+        console.error('Error getting all users:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
 });
 
-
 module.exports = router;
+
